@@ -1,0 +1,45 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: taskboard_db
+      POSTGRES_USER: taskboard
+      POSTGRES_PASSWORD: taskboard123
+    volumes:
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - taskboard-network
+
+  api:
+    build: ./api
+    environment:
+      DB_HOST: db
+      DB_NAME: taskboard_db
+      DB_USER: taskboard
+      DB_PASSWORD: taskboard123
+    depends_on:
+      - db
+    networks:
+      - taskboard-network
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/ssl:/etc/nginx/ssl
+      - ./frontend:/usr/share/nginx/html
+    depends_on:
+      - api
+    networks:
+      - taskboard-network
+
+networks:
+  taskboard-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Docker N-Tier Lab</title>
+</head>
+<body>
+    <h1>Hello from Frontend!</h1>
+    <div id="data">Loading data from API...</div>
+    <script>
+        fetch('/api/tasks')
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('data').innerText = JSON.stringify(data);
+            });
+    </script>
+</body>
+</html>
