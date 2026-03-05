@@ -1,40 +1,51 @@
-# engce301-lab-ntier-redis-loadbalance
+# ENGCE301: N-Tier Architecture, Redis Caching, and Load Balancing
 
-## บันทึกผลการทดลอง
-
-### สถานการณ์ที่ 1
-**ปัญหาที่พบ:** เมื่อสั่ง `docker stop` เพื่อจำลองสถานการณ์ Server ล่ม พบว่าหน้าเว็บเกิด Error `502 Bad Gateway` หรือ `504 Gateway Timeout` บางครั้งต้องกด Refresh หลายรอบ หรือต้อง Restart nginx ถึงจะกลับมาใช้งานได้ สาเหตุเพราะ nginx เรียกหา App Instance เดิมที่ล่มไปแล้ว และไม่มี Redirect ไปยัง App Instance ตัวอื่น
-
-**การแก้ไข:** ทำการแก้ไข Config nginx `default.conf` ดังนี้
-* ใช้คำสั่ง `resolve` เพื่อให้ nginx อัปเดตรายชื่อ IP จาก DNS ของ Docker เรื่อยๆ (Service Discovery)
-* เพิ่ม `proxy_next_upstream` เพื่อให้ระบบทำ **Failover** (เมื่อยิงไปเจอตัวที่ล่ม ให้สลับไปยิงตัวอื่นที่ยังติดอยู่อยู่ทันทีแบบอัตโนมัติ)
-
-**ผลลัพธ์:** เมื่อสั่งปิด App บางตัว ระบบยังคงสามารถตอบสนองได้ต่อเนื่องผ่าน Instance ตัวอื่นที่เหลืออยู่ โดยไม่เกิดอาการล่มยาวให้ฝั่ง Frontend เห็น
-
-### สถานการณ์ที่ 2
-เป็นการทดสอบเพื่อดูว่า การทำ Load Balancing แบบ Round-Robin โดยขยายจำนวน App Instance ช่วยเพิ่ม Throughput และลด Latency ได้จริงหรือไม่ 
-
-ทดสอบด้วยคำสั่ง `wrk -t4 -c50 -d20s http://localhost/api/tasks`
-
-| Case | #App Instances | Concurrency (c) | Duration | Avg Latency | Requests/sec | สรุป |
-|:---:|:---:|:---:|:---:|:---:|:---:|---|
-| **A** | 1 | 50 | 20s | `25.68 ms` | `2984.25` | baseline |
-| **B** | 3 | 50 | 20s | `20.15 ms` | `3226.00` | after scale-out |
-
-**สรุปผลการทดลอง**
-1. **Avg Latency** ลดลงอย่างชัดเจน จาก 25.68 ms เหลือเพียง 20.15 ms บ่งบอกว่าประสิทธิภาพในการตอบสนองแต่ละ Request ไวขึ้น
-2. **Requests/sec** ค่า Throughput เพิ่มขึ้น จากประมาณ 2,984 Req/s เป็น 3,226 Req/s รองรับโหลดได้มากขึ้น
-3. การใช้ N-Tier Architecture ควบคู่กับ Redis Caching และ nginx Load Balancing ช่วยให้ระบบมีการ Scale และ Highly Available
+โปรเจกต์นี้เป็นการศึกษาและทดลองออกแบบระบบสถาปัตยกรรมแบบ N-Tier โดยใช้ Docker ในการจำลองสภาพแวดล้อมที่มีทั้งการทำ Caching ด้วย Redis และการทำ Load Balancing ด้วย Nginx เพื่อเพิ่มประสิทธิภาพและความทนทานให้กับระบบ
 
 ---
 
-## สรุปความรู้ที่ได้จากการเรียนสัปดาห์นี้
+## 🛠 การทดสอบที่ 1: การจัดการ Service Availability & Failover
 
-ในการออกแบบ Software ที่ดีควรประกอบด้วย 3 ส่วนหลักคือ **Frontend, Backend และ Database** โดยก่อนลงมือพัฒนา เราควรเลือกสถาปัตยกรรม (Architecture) ให้เหมาะสมกับเป้าหมายของระบบ เช่น เน้น Performance, เน้นความทนทานต่อการล่ม (High Availability) หรือเน้น Security 
+### ปัญหาที่พบ (Scenario)
+จากการจำลองสถานการณ์ Server ล่มด้วยคำสั่ง `docker stop` พบว่าระบบเดิมเกิดปัญหา **Service Disruption** โดยแสดงผลเป็นหน้า Error `502 Bad Gateway` หรือ `504 Gateway Timeout` เนื่องจาก Nginx พยายามเรียกไปยัง Instance ที่ใช้งานไม่ได้แล้ว และไม่มีกลไกในการสลับไปยังตัวที่ยังทำงานอยู่โดยอัตโนมัติ
 
-### N-Tier ยังไง? แล้วเมื่อไหร่ควรเพิ่ม Tier?
-* **Database ถูก Query ซ้ำ ๆ:** เพิ่ม Cache Tier (เช่น Redis) เพื่อลดภาระ DB และเพิ่มความเร็ว
-* **App Server รับ Load ไม่ไหว:** เพิ่ม Load Balancer Tier (เช่น nginx) และ Scale App ให้กระจายโหลด
-* **เมื่อไหร่ที่ไม่ควรเพิ่ม:** ระบบยังมีขนาดเล็ก ผู้ใช้ไม่มาก การเพิ่ม Tier อาจทำให้ระบบซับซ้อนเกินความจำเป็น (Over-engineering)
+### แนวทางการแก้ไข (Implementation)
+ได้ทำการปรับปรุงการตั้งค่าใน `nginx/default.conf` เพื่อเพิ่มความทนทาน (Resilience):
+1. **Dynamic Service Discovery:** ใช้คำสั่ง `resolver` เพื่อให้ Nginx คอยอัปเดต IP Address ของ Service จาก Docker DNS อย่างสม่ำเสมอ
+2. **Automatic Failover:** เพิ่มคอนฟิก `proxy_next_upstream` เพื่อให้ระบบทำการสลับไปเรียก App Instance ตัวถัดไปทันทีหากตัวปัจจุบันตอบสนองผิดปกติ
+
+### ผลการทดสอบ
+หลังการแก้ไข ระบบสามารถให้บริการได้อย่างต่อเนื่อง (**High Availability**) แม้จะมี Instance บางส่วนล่มไป แต่ผู้ใช้งานฝั่ง Frontend จะไม่พบหน้า Error และสามารถใช้งานได้ตามปกติ
+
+---
+
+## 📈 การทดสอบที่ 2: การวัดประสิทธิภาพผ่าน Horizontal Scaling
+
+ทดสอบประสิทธิภาพการรับโหลดด้วยเครื่องมือ `wrk` ผ่านคำสั่ง:
+`wrk -t4 -c50 -d20s http://localhost/api/tasks`
+
+### ตารางเปรียบเทียบผลลัพธ์
+| Metric | Case A: 1 Instance (Baseline) | Case B: 3 Instances (Scale-out) |
+| :--- | :---: | :---: |
+| **Avg Latency** | 25.68 ms | **20.15 ms** |
+| **Throughput (Req/s)** | 2,984.25 | **3,226.00** |
+
+**วิเคราะห์ผลการทดลอง:**
+- **Latency:** การเพิ่ม Instance ช่วยลดระยะเวลาตอบสนองลงได้ประมาณ 21%
+- **Throughput:** อัตราการประมวลผลคำสั่งต่อวินาทีเพิ่มสูงขึ้นอย่างเห็นได้ชัดจากการกระจายโหลดแบบ Round-Robin
+
+---
+
+## 💡 สรุปองค์ความรู้ที่ได้รับ (Key Learnings)
+
+### 1. การออกแบบสถาปัตยกรรม (Architecture Design)
+การเลือกโครงสร้างระหว่าง Frontend, Backend และ Database ต้องคำนึงถึงเป้าหมายหลักเป็นสำคัญ เช่น ความเร็ว (Performance), ความพร้อมใช้งาน (Availability) หรือความปลอดภัย (Security)
+
+### 2. กลยุทธ์การเพิ่ม Tier ในระบบ
+- **เพิ่ม Cache Tier (Redis):** เมื่อต้องการลดภาระการทำงานหนักของ Database (DB Bottleneck) และเพิ่มความเร็วในการอ่านข้อมูล
+- **เพิ่ม Load Balancer Tier (Nginx):** เมื่อต้องการขยายขีดความสามารถ (Scaling) ให้รองรับผู้ใช้งานจำนวนมากพร้อมกัน
+
+### 3. ข้อควรระวัง
+ควรระวังเรื่อง **Over-engineering** หากระบบยังมีขนาดเล็กและมีผู้ใช้งานไม่มาก การเพิ่ม Tier ที่ซับซ้อนเกินไปอาจทำให้การบำรุงรักษาทำได้ยากและเพิ่มต้นทุนโดยไม่จำเป็น
 
 ---
